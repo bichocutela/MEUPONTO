@@ -1,9 +1,14 @@
 package com.bichocutela.meuponto
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -27,6 +32,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -43,6 +49,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import com.bichocutela.meuponto.data.PunchStore
 import com.bichocutela.meuponto.data.ScheduleStore
 import com.bichocutela.meuponto.domain.Punch
@@ -53,6 +60,8 @@ import com.bichocutela.meuponto.domain.WorkSchedule
 import com.bichocutela.meuponto.domain.asHourMinuteText
 import com.bichocutela.meuponto.domain.nextPunchType
 import com.bichocutela.meuponto.domain.state
+import com.bichocutela.meuponto.notifications.LunchReminderReceiver
+import com.bichocutela.meuponto.notifications.LunchReminderScheduler
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.launch
@@ -70,10 +79,24 @@ private fun MeuPontoApp() {
     val context = LocalContext.current.applicationContext
     val punchStore = remember(context) { PunchStore(context) }
     val scheduleStore = remember(context) { ScheduleStore(context) }
+    val reminderScheduler = remember(context) { LunchReminderScheduler(context) }
     val punches by punchStore.todayPunches.collectAsState(initial = emptyList())
     val schedule by scheduleStore.schedule.collectAsState(initial = WorkSchedule())
     val scope = rememberCoroutineScope()
     var showSettings by remember { mutableStateOf(false) }
+
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { }
+
+    LaunchedEffect(Unit) {
+        LunchReminderReceiver.createChannel(context)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
 
     val state = punches.state()
     val nextPunch = state.nextPunchType()
@@ -172,7 +195,21 @@ private fun MeuPontoApp() {
                     Button(
                         onClick = {
                             nextPunch?.let { type ->
-                                val updated = punches + Punch(type, LocalTime.now().withSecond(0).withNano(0))
+                                val now = LocalTime.now().withSecond(0).withNano(0)
+                                val updated = punches + Punch(type, now)
+
+                                when (type) {
+                                    PunchType.LUNCH_OUT -> {
+                                        val expectedReturn = now.plusMinutes(schedule.lunchMinutes.toLong())
+                                        reminderScheduler.schedule(
+                                            expectedReturn = expectedReturn,
+                                            minutesBefore = schedule.reminderMinutesBefore
+                                        )
+                                    }
+                                    PunchType.LUNCH_RETURN -> reminderScheduler.cancel()
+                                    else -> Unit
+                                }
+
                                 scope.launch { punchStore.saveToday(updated) }
                             }
                         },
