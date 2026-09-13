@@ -18,6 +18,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -381,7 +382,7 @@ private fun SettingRow(title: String, value: String, onMinus: () -> Unit, onPlus
 }
 
 @Composable
-private fun GlassCard(glow: Float, content: @Composable Column.() -> Unit) {
+private fun GlassCard(glow: Float, content: @Composable ColumnScope.() -> Unit) {
     Column(
         modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(Color.White.copy(alpha = 0.12f * glow)).padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
