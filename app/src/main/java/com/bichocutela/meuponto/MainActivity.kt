@@ -23,13 +23,16 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -41,6 +44,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bichocutela.meuponto.data.PunchStore
+import com.bichocutela.meuponto.data.ScheduleStore
 import com.bichocutela.meuponto.domain.Punch
 import com.bichocutela.meuponto.domain.PunchType
 import com.bichocutela.meuponto.domain.WorkDayCalculator
@@ -64,11 +68,13 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun MeuPontoApp() {
     val context = LocalContext.current.applicationContext
-    val store = remember(context) { PunchStore(context) }
-    val punches by store.todayPunches.collectAsState(initial = emptyList())
+    val punchStore = remember(context) { PunchStore(context) }
+    val scheduleStore = remember(context) { ScheduleStore(context) }
+    val punches by punchStore.todayPunches.collectAsState(initial = emptyList())
+    val schedule by scheduleStore.schedule.collectAsState(initial = WorkSchedule())
     val scope = rememberCoroutineScope()
+    var showSettings by remember { mutableStateOf(false) }
 
-    val schedule = remember { WorkSchedule() }
     val state = punches.state()
     val nextPunch = state.nextPunchType()
     val formatter = remember { DateTimeFormatter.ofPattern("HH:mm") }
@@ -106,19 +112,10 @@ private fun MeuPontoApp() {
                     verticalArrangement = Arrangement.Center,
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text(
-                        text = "MEU PONTO",
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 28.sp
-                    )
+                    Text("MEU PONTO", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 28.sp)
                     Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = statusText(state),
-                        color = Color.White.copy(alpha = 0.78f),
-                        fontSize = 15.sp
-                    )
-                    Spacer(Modifier.height(24.dp))
+                    Text(statusText(state), color = Color.White.copy(alpha = 0.78f), fontSize = 15.sp)
+                    Spacer(Modifier.height(20.dp))
 
                     GlassCard(glow = glow) {
                         Text(
@@ -128,8 +125,7 @@ private fun MeuPontoApp() {
                             fontSize = 54.sp
                         )
                         Text(
-                            text = punches.lastOrNull()?.let { punchLabel(it.type) }
-                                ?: "Nenhum ponto registrado hoje",
+                            text = punches.lastOrNull()?.let { punchLabel(it.type) } ?: "Nenhum ponto registrado hoje",
                             color = Color.White.copy(alpha = 0.72f),
                             fontSize = 14.sp
                         )
@@ -151,8 +147,7 @@ private fun MeuPontoApp() {
                         }
                     }
 
-                    Spacer(Modifier.height(16.dp))
-
+                    Spacer(Modifier.height(14.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -166,31 +161,23 @@ private fun MeuPontoApp() {
                             modifier = Modifier.weight(1f),
                             title = if (state == WorkDayState.FINISHED) "Saldo" else "Falta",
                             value = if (state == WorkDayState.FINISHED) {
-                                (WorkDayCalculator.balanceMinutes(punches, schedule) ?: 0)
-                                    .asHourMinuteText(showSign = true)
+                                (WorkDayCalculator.balanceMinutes(punches, schedule) ?: 0).asHourMinuteText(showSign = true)
                             } else {
                                 WorkDayCalculator.remainingMinutes(punches, schedule).asHourMinuteText()
                             }
                         )
                     }
 
-                    Spacer(Modifier.height(22.dp))
-
+                    Spacer(Modifier.height(18.dp))
                     Button(
                         onClick = {
                             nextPunch?.let { type ->
-                                val updated = punches + Punch(
-                                    type = type,
-                                    time = LocalTime.now().withSecond(0).withNano(0)
-                                )
-                                scope.launch { store.saveToday(updated) }
+                                val updated = punches + Punch(type, LocalTime.now().withSecond(0).withNano(0))
+                                scope.launch { punchStore.saveToday(updated) }
                             }
                         },
                         enabled = nextPunch != null,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(60.dp)
-                            .alpha(if (nextPunch == null) 0.55f else glow),
+                        modifier = Modifier.fillMaxWidth().height(60.dp).alpha(if (nextPunch == null) 0.55f else glow),
                         shape = RoundedCornerShape(22.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = Color.White,
@@ -202,12 +189,25 @@ private fun MeuPontoApp() {
                         Text(buttonText(nextPunch), fontWeight = FontWeight.Bold, fontSize = 17.sp)
                     }
 
-                    Spacer(Modifier.height(14.dp))
-                    Text(
-                        text = "Jornada ${schedule.dailyMinutes.asHourMinuteText()}  •  Almoço ${schedule.lunchMinutes.asHourMinuteText()}",
-                        color = Color.White.copy(alpha = 0.70f),
-                        fontSize = 13.sp
-                    )
+                    Spacer(Modifier.height(10.dp))
+                    OutlinedButton(onClick = { showSettings = !showSettings }, modifier = Modifier.fillMaxWidth()) {
+                        Text(if (showSettings) "FECHAR AJUSTES" else "AJUSTAR JORNADA", color = Color.White)
+                    }
+
+                    if (showSettings) {
+                        Spacer(Modifier.height(12.dp))
+                        SettingsCard(
+                            schedule = schedule,
+                            onChange = { updated -> scope.launch { scheduleStore.save(updated) } }
+                        )
+                    } else {
+                        Spacer(Modifier.height(10.dp))
+                        Text(
+                            text = "Jornada ${schedule.dailyMinutes.asHourMinuteText()}  •  Almoço ${schedule.lunchMinutes.asHourMinuteText()}",
+                            color = Color.White.copy(alpha = 0.70f),
+                            fontSize = 13.sp
+                        )
+                    }
                 }
             }
         }
@@ -215,13 +215,50 @@ private fun MeuPontoApp() {
 }
 
 @Composable
-private fun GlassCard(glow: Float, content: @Composable Column.() -> Unit) {
+private fun SettingsCard(schedule: WorkSchedule, onChange: (WorkSchedule) -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(28.dp))
-            .background(Color.White.copy(alpha = 0.12f * glow))
-            .padding(24.dp),
+            .clip(RoundedCornerShape(22.dp))
+            .background(Color.White.copy(alpha = 0.10f))
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        SettingRow(
+            title = "Jornada",
+            value = schedule.dailyMinutes.asHourMinuteText(),
+            onMinus = { onChange(schedule.copy(dailyMinutes = (schedule.dailyMinutes - 15).coerceAtLeast(60))) },
+            onPlus = { onChange(schedule.copy(dailyMinutes = (schedule.dailyMinutes + 15).coerceAtMost(16 * 60))) }
+        )
+        SettingRow(
+            title = "Almoço",
+            value = schedule.lunchMinutes.asHourMinuteText(),
+            onMinus = { onChange(schedule.copy(lunchMinutes = (schedule.lunchMinutes - 5).coerceAtLeast(15))) },
+            onPlus = { onChange(schedule.copy(lunchMinutes = (schedule.lunchMinutes + 5).coerceAtMost(240))) }
+        )
+        SettingRow(
+            title = "Lembrete",
+            value = "${schedule.reminderMinutesBefore} min",
+            onMinus = { onChange(schedule.copy(reminderMinutesBefore = previousReminder(schedule.reminderMinutesBefore))) },
+            onPlus = { onChange(schedule.copy(reminderMinutesBefore = nextReminder(schedule.reminderMinutesBefore))) }
+        )
+    }
+}
+
+@Composable
+private fun SettingRow(title: String, value: String, onMinus: () -> Unit, onPlus: () -> Unit) {
+    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(title, color = Color.White.copy(alpha = 0.76f), modifier = Modifier.weight(1f))
+        OutlinedButton(onClick = onMinus) { Text("−", color = Color.White) }
+        Text(value, color = Color.White, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 12.dp))
+        OutlinedButton(onClick = onPlus) { Text("+", color = Color.White) }
+    }
+}
+
+@Composable
+private fun GlassCard(glow: Float, content: @Composable Column.() -> Unit) {
+    Column(
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(Color.White.copy(alpha = 0.12f * glow)).padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         content = content
     )
@@ -230,16 +267,25 @@ private fun GlassCard(glow: Float, content: @Composable Column.() -> Unit) {
 @Composable
 private fun MetricCard(modifier: Modifier, title: String, value: String) {
     Column(
-        modifier = modifier
-            .clip(RoundedCornerShape(22.dp))
-            .background(Color.White.copy(alpha = 0.10f))
-            .padding(16.dp),
+        modifier = modifier.clip(RoundedCornerShape(22.dp)).background(Color.White.copy(alpha = 0.10f)).padding(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(title, color = Color.White.copy(alpha = 0.66f), fontSize = 12.sp)
         Spacer(Modifier.height(4.dp))
         Text(value, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 22.sp)
     }
+}
+
+private val reminderOptions = listOf(3, 5, 7, 10, 15, 20, 30)
+
+private fun previousReminder(current: Int): Int {
+    val index = reminderOptions.indexOf(current).let { if (it < 0) 1 else it }
+    return reminderOptions[(index - 1).coerceAtLeast(0)]
+}
+
+private fun nextReminder(current: Int): Int {
+    val index = reminderOptions.indexOf(current).let { if (it < 0) 1 else it }
+    return reminderOptions[(index + 1).coerceAtMost(reminderOptions.lastIndex)]
 }
 
 private fun statusText(state: WorkDayState): String = when (state) {
