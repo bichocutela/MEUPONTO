@@ -13,33 +13,75 @@ import kotlinx.coroutines.flow.map
 
 private val Context.punchDataStore by preferencesDataStore(name = "punches")
 
+data class PunchDay(
+    val date: LocalDate,
+    val punches: List<Punch>
+)
+
 class PunchStore(private val context: Context) {
     private object Keys {
         val DATE = stringPreferencesKey("date")
         val PUNCHES = stringPreferencesKey("punches")
+        val HISTORY = stringPreferencesKey("history_v2")
     }
 
-    val todayPunches: Flow<List<Punch>> = context.punchDataStore.data.map { prefs ->
-        val today = LocalDate.now().toString()
-        if (prefs[Keys.DATE] != today) {
-            emptyList()
-        } else {
-            decode(prefs[Keys.PUNCHES].orEmpty())
-        }
+    val history: Flow<List<PunchDay>> = context.punchDataStore.data.map { prefs ->
+        val stored = decodeHistory(prefs[Keys.HISTORY].orEmpty()).toMutableMap()
+        migrateLegacyInto(stored, prefs[Keys.DATE], prefs[Keys.PUNCHES])
+        stored.entries
+            .sortedByDescending { it.key }
+            .map { PunchDay(it.key, it.value) }
+    }
+
+    val todayPunches: Flow<List<Punch>> = history.map { days ->
+        days.firstOrNull { it.date == LocalDate.now() }?.punches.orEmpty()
     }
 
     suspend fun saveToday(punches: List<Punch>) {
         context.punchDataStore.edit { prefs ->
-            prefs[Keys.DATE] = LocalDate.now().toString()
-            prefs[Keys.PUNCHES] = encode(punches)
+            val stored = decodeHistory(prefs[Keys.HISTORY].orEmpty()).toMutableMap()
+            migrateLegacyInto(stored, prefs[Keys.DATE], prefs[Keys.PUNCHES])
+            stored[LocalDate.now()] = punches
+            prefs[Keys.HISTORY] = encodeHistory(stored)
+            prefs.remove(Keys.DATE)
+            prefs.remove(Keys.PUNCHES)
         }
     }
 
-    private fun encode(punches: List<Punch>): String = punches.joinToString("|") {
+    private fun migrateLegacyInto(
+        target: MutableMap<LocalDate, List<Punch>>,
+        legacyDate: String?,
+        legacyPunches: String?
+    ) {
+        val date = legacyDate?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: return
+        if (target.containsKey(date)) return
+        val punches = decodePunches(legacyPunches.orEmpty())
+        if (punches.isNotEmpty()) target[date] = punches
+    }
+
+    private fun encodeHistory(days: Map<LocalDate, List<Punch>>): String = days.entries
+        .sortedBy { it.key }
+        .joinToString("\n") { (date, punches) ->
+            "$date#${encodePunches(punches)}"
+        }
+
+    private fun decodeHistory(raw: String): Map<LocalDate, List<Punch>> = raw
+        .lineSequence()
+        .filter { it.isNotBlank() }
+        .mapNotNull { line ->
+            val separator = line.indexOf('#')
+            if (separator <= 0) return@mapNotNull null
+            val date = runCatching { LocalDate.parse(line.substring(0, separator)) }.getOrNull()
+                ?: return@mapNotNull null
+            date to decodePunches(line.substring(separator + 1))
+        }
+        .toMap()
+
+    private fun encodePunches(punches: List<Punch>): String = punches.joinToString("|") {
         "${it.type.name}@${it.time}"
     }
 
-    private fun decode(raw: String): List<Punch> = raw
+    private fun decodePunches(raw: String): List<Punch> = raw
         .split('|')
         .mapNotNull { item ->
             val parts = item.split('@')
