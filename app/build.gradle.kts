@@ -1,10 +1,36 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
-    // Enable this after app/google-services.json is added from Firebase.
-    // id("com.google.gms.google-services")
 }
+
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
+}
+
+val keystorePropertiesFile = rootProject.file("keystore.properties")
+val keystoreProperties = Properties().apply {
+    if (keystorePropertiesFile.exists()) {
+        keystorePropertiesFile.inputStream().use(::load)
+    }
+}
+
+fun secret(name: String): String? =
+    System.getenv(name)?.takeIf { it.isNotBlank() }
+        ?: keystoreProperties.getProperty(name)?.takeIf { it.isNotBlank() }
+
+val releaseStoreFile = secret("storeFile") ?: System.getenv("MEUPONTO_KEYSTORE_PATH")
+val releaseStorePassword = secret("storePassword") ?: System.getenv("MEUPONTO_STORE_PASSWORD")
+val releaseKeyAlias = secret("keyAlias") ?: System.getenv("MEUPONTO_KEY_ALIAS")
+val releaseKeyPassword = secret("keyPassword") ?: System.getenv("MEUPONTO_KEY_PASSWORD")
+val hasReleaseSigning = listOf(
+    releaseStoreFile,
+    releaseStorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword
+).all { !it.isNullOrBlank() }
 
 android {
     namespace = "com.bichocutela.meuponto"
@@ -18,9 +44,23 @@ android {
         versionName = "0.1.0"
     }
 
+    if (hasReleaseSigning) {
+        signingConfigs {
+            create("release") {
+                storeFile = rootProject.file(requireNotNull(releaseStoreFile))
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -57,6 +97,5 @@ dependencies {
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 
-    // Ready for Firebase once google-services.json is supplied.
     implementation(platform("com.google.firebase:firebase-bom:34.19.0"))
 }
