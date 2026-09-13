@@ -26,19 +26,21 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.bichocutela.meuponto.data.PunchStore
 import com.bichocutela.meuponto.domain.Punch
 import com.bichocutela.meuponto.domain.PunchType
 import com.bichocutela.meuponto.domain.WorkDayCalculator
@@ -49,6 +51,7 @@ import com.bichocutela.meuponto.domain.nextPunchType
 import com.bichocutela.meuponto.domain.state
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -60,8 +63,12 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun MeuPontoApp() {
+    val context = LocalContext.current.applicationContext
+    val store = remember(context) { PunchStore(context) }
+    val punches by store.todayPunches.collectAsState(initial = emptyList())
+    val scope = rememberCoroutineScope()
+
     val schedule = remember { WorkSchedule() }
-    var punches by remember { mutableStateOf<List<Punch>>(emptyList()) }
     val state = punches.state()
     val nextPunch = state.nextPunchType()
     val formatter = remember { DateTimeFormatter.ofPattern("HH:mm") }
@@ -172,7 +179,11 @@ private fun MeuPontoApp() {
                     Button(
                         onClick = {
                             nextPunch?.let { type ->
-                                punches = punches + Punch(type = type, time = LocalTime.now().withSecond(0).withNano(0))
+                                val updated = punches + Punch(
+                                    type = type,
+                                    time = LocalTime.now().withSecond(0).withNano(0)
+                                )
+                                scope.launch { store.saveToday(updated) }
                             }
                         },
                         enabled = nextPunch != null,
