@@ -13,6 +13,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -26,6 +27,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -35,6 +39,16 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.bichocutela.meuponto.domain.Punch
+import com.bichocutela.meuponto.domain.PunchType
+import com.bichocutela.meuponto.domain.WorkDayCalculator
+import com.bichocutela.meuponto.domain.WorkDayState
+import com.bichocutela.meuponto.domain.WorkSchedule
+import com.bichocutela.meuponto.domain.asHourMinuteText
+import com.bichocutela.meuponto.domain.nextPunchType
+import com.bichocutela.meuponto.domain.state
+import java.time.LocalTime
+import java.time.format.DateTimeFormatter
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -46,6 +60,12 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun MeuPontoApp() {
+    val schedule = remember { WorkSchedule() }
+    var punches by remember { mutableStateOf<List<Punch>>(emptyList()) }
+    val state = punches.state()
+    val nextPunch = state.nextPunchType()
+    val formatter = remember { DateTimeFormatter.ofPattern("HH:mm") }
+
     val transition = rememberInfiniteTransition(label = "glassPulse")
     val glow by transition.animateFloat(
         initialValue = 0.72f,
@@ -72,7 +92,7 @@ private fun MeuPontoApp() {
                             )
                         )
                     )
-                    .padding(24.dp)
+                    .padding(horizontal = 20.dp, vertical = 32.dp)
             ) {
                 Column(
                     modifier = Modifier.fillMaxSize(),
@@ -85,53 +105,151 @@ private fun MeuPontoApp() {
                         fontWeight = FontWeight.Bold,
                         fontSize = 28.sp
                     )
-                    Spacer(Modifier.height(12.dp))
+                    Spacer(Modifier.height(8.dp))
                     Text(
-                        text = "Seu dia, no tempo certo.",
+                        text = statusText(state),
                         color = Color.White.copy(alpha = 0.78f),
-                        fontSize = 16.sp
+                        fontSize = 15.sp
                     )
-                    Spacer(Modifier.height(36.dp))
+                    Spacer(Modifier.height(24.dp))
 
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(28.dp))
-                            .background(Color.White.copy(alpha = 0.12f * glow))
-                            .padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
+                    GlassCard(glow = glow) {
                         Text(
-                            text = "--:--",
+                            text = punches.lastOrNull()?.time?.format(formatter) ?: "--:--",
                             color = Color.White,
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 54.sp
                         )
                         Text(
-                            text = "Nenhum ponto registrado hoje",
+                            text = punches.lastOrNull()?.let { punchLabel(it.type) }
+                                ?: "Nenhum ponto registrado hoje",
                             color = Color.White.copy(alpha = 0.72f),
                             fontSize = 14.sp
                         )
+
+                        if (state == WorkDayState.ON_LUNCH) {
+                            Spacer(Modifier.height(18.dp))
+                            val expectedReturn = WorkDayCalculator.lunchExpectedReturn(punches, schedule)
+                            Text(
+                                text = "Retorno previsto ${expectedReturn?.format(formatter) ?: "--:--"}",
+                                color = Color.White,
+                                fontWeight = FontWeight.Medium,
+                                fontSize = 16.sp
+                            )
+                            Text(
+                                text = "Lembrete ${schedule.reminderMinutesBefore} min antes",
+                                color = Color.White.copy(alpha = 0.70f),
+                                fontSize = 13.sp
+                            )
+                        }
                     }
 
-                    Spacer(Modifier.height(28.dp))
+                    Spacer(Modifier.height(16.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        MetricCard(
+                            modifier = Modifier.weight(1f),
+                            title = "Trabalhado",
+                            value = WorkDayCalculator.workedMinutes(punches).asHourMinuteText()
+                        )
+                        MetricCard(
+                            modifier = Modifier.weight(1f),
+                            title = if (state == WorkDayState.FINISHED) "Saldo" else "Falta",
+                            value = if (state == WorkDayState.FINISHED) {
+                                (WorkDayCalculator.balanceMinutes(punches, schedule) ?: 0)
+                                    .asHourMinuteText(showSign = true)
+                            } else {
+                                WorkDayCalculator.remainingMinutes(punches, schedule).asHourMinuteText()
+                            }
+                        )
+                    }
+
+                    Spacer(Modifier.height(22.dp))
 
                     Button(
-                        onClick = { },
+                        onClick = {
+                            nextPunch?.let { type ->
+                                punches = punches + Punch(type = type, time = LocalTime.now().withSecond(0).withNano(0))
+                            }
+                        },
+                        enabled = nextPunch != null,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(58.dp)
-                            .alpha(glow),
+                            .height(60.dp)
+                            .alpha(if (nextPunch == null) 0.55f else glow),
                         shape = RoundedCornerShape(22.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = Color.White,
-                            contentColor = Color(0xFF17132E)
+                            contentColor = Color(0xFF17132E),
+                            disabledContainerColor = Color.White.copy(alpha = 0.45f),
+                            disabledContentColor = Color(0xFF17132E).copy(alpha = 0.65f)
                         )
                     ) {
-                        Text("BATER PONTO", fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                        Text(buttonText(nextPunch), fontWeight = FontWeight.Bold, fontSize = 17.sp)
                     }
+
+                    Spacer(Modifier.height(14.dp))
+                    Text(
+                        text = "Jornada ${schedule.dailyMinutes.asHourMinuteText()}  •  Almoço ${schedule.lunchMinutes.asHourMinuteText()}",
+                        color = Color.White.copy(alpha = 0.70f),
+                        fontSize = 13.sp
+                    )
                 }
             }
         }
     }
+}
+
+@Composable
+private fun GlassCard(glow: Float, content: @Composable Column.() -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(28.dp))
+            .background(Color.White.copy(alpha = 0.12f * glow))
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        content = content
+    )
+}
+
+@Composable
+private fun MetricCard(modifier: Modifier, title: String, value: String) {
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(22.dp))
+            .background(Color.White.copy(alpha = 0.10f))
+            .padding(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(title, color = Color.White.copy(alpha = 0.66f), fontSize = 12.sp)
+        Spacer(Modifier.height(4.dp))
+        Text(value, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 22.sp)
+    }
+}
+
+private fun statusText(state: WorkDayState): String = when (state) {
+    WorkDayState.NOT_STARTED -> "Pronto para começar seu dia"
+    WorkDayState.WORKING_BEFORE_LUNCH -> "Trabalhando"
+    WorkDayState.ON_LUNCH -> "Intervalo de almoço"
+    WorkDayState.WORKING_AFTER_LUNCH -> "De volta ao trabalho"
+    WorkDayState.FINISHED -> "Jornada encerrada"
+}
+
+private fun punchLabel(type: PunchType): String = when (type) {
+    PunchType.ENTRY -> "Entrada registrada"
+    PunchType.LUNCH_OUT -> "Saída para almoço"
+    PunchType.LUNCH_RETURN -> "Retorno do almoço"
+    PunchType.EXIT -> "Saída registrada"
+}
+
+private fun buttonText(type: PunchType?): String = when (type) {
+    PunchType.ENTRY -> "REGISTRAR ENTRADA"
+    PunchType.LUNCH_OUT -> "SAIR PARA ALMOÇO"
+    PunchType.LUNCH_RETURN -> "VOLTAR DO ALMOÇO"
+    PunchType.EXIT -> "ENCERRAR JORNADA"
+    null -> "JORNADA ENCERRADA"
 }
