@@ -37,11 +37,19 @@ class PunchStore(private val context: Context) {
         days.firstOrNull { it.date == LocalDate.now() }?.punches.orEmpty()
     }
 
-    suspend fun saveToday(punches: List<Punch>) {
+    suspend fun saveToday(punches: List<Punch>) = saveDay(LocalDate.now(), punches)
+
+    suspend fun saveDay(date: LocalDate, punches: List<Punch>) {
         context.punchDataStore.edit { prefs ->
             val stored = decodeHistory(prefs[Keys.HISTORY].orEmpty()).toMutableMap()
             migrateLegacyInto(stored, prefs[Keys.DATE], prefs[Keys.PUNCHES])
-            stored[LocalDate.now()] = punches
+
+            if (punches.isEmpty()) {
+                stored.remove(date)
+            } else {
+                stored[date] = punches
+            }
+
             prefs[Keys.HISTORY] = encodeHistory(stored)
             prefs.remove(Keys.DATE)
             prefs.remove(Keys.PUNCHES)
