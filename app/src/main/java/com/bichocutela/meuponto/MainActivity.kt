@@ -24,7 +24,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
@@ -50,6 +52,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import com.bichocutela.meuponto.data.PunchDay
 import com.bichocutela.meuponto.data.PunchStore
 import com.bichocutela.meuponto.data.ScheduleStore
 import com.bichocutela.meuponto.domain.Punch
@@ -64,6 +67,7 @@ import com.bichocutela.meuponto.notifications.LunchReminderReceiver
 import com.bichocutela.meuponto.notifications.LunchReminderScheduler
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -81,9 +85,11 @@ private fun MeuPontoApp() {
     val scheduleStore = remember(context) { ScheduleStore(context) }
     val reminderScheduler = remember(context) { LunchReminderScheduler(context) }
     val punches by punchStore.todayPunches.collectAsState(initial = emptyList())
+    val history by punchStore.history.collectAsState(initial = emptyList())
     val schedule by scheduleStore.schedule.collectAsState(initial = WorkSchedule())
     val scope = rememberCoroutineScope()
     var showSettings by remember { mutableStateOf(false) }
+    var showHistory by remember { mutableStateOf(false) }
 
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -131,10 +137,13 @@ private fun MeuPontoApp() {
                     .padding(horizontal = 20.dp, vertical = 32.dp)
             ) {
                 Column(
-                    modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.Center,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.Top,
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
+                    Spacer(Modifier.height(24.dp))
                     Text("MEU PONTO", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 28.sp)
                     Spacer(Modifier.height(8.dp))
                     Text(statusText(state), color = Color.White.copy(alpha = 0.78f), fontSize = 15.sp)
@@ -227,22 +236,101 @@ private fun MeuPontoApp() {
                     }
 
                     Spacer(Modifier.height(10.dp))
-                    OutlinedButton(onClick = { showSettings = !showSettings }, modifier = Modifier.fillMaxWidth()) {
-                        Text(if (showSettings) "FECHAR AJUSTES" else "AJUSTAR JORNADA", color = Color.White)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                showHistory = false
+                                showSettings = !showSettings
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(if (showSettings) "FECHAR" else "AJUSTES", color = Color.White)
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                showSettings = false
+                                showHistory = !showHistory
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(if (showHistory) "HOJE" else "HISTÓRICO", color = Color.White)
+                        }
                     }
 
-                    if (showSettings) {
-                        Spacer(Modifier.height(12.dp))
-                        SettingsCard(
-                            schedule = schedule,
-                            onChange = { updated -> scope.launch { scheduleStore.save(updated) } }
-                        )
-                    } else {
-                        Spacer(Modifier.height(10.dp))
+                    when {
+                        showSettings -> {
+                            Spacer(Modifier.height(12.dp))
+                            SettingsCard(
+                                schedule = schedule,
+                                onChange = { updated -> scope.launch { scheduleStore.save(updated) } }
+                            )
+                        }
+                        showHistory -> {
+                            Spacer(Modifier.height(12.dp))
+                            HistorySection(history = history, schedule = schedule)
+                        }
+                        else -> {
+                            Spacer(Modifier.height(10.dp))
+                            Text(
+                                text = "Jornada ${schedule.dailyMinutes.asHourMinuteText()}  •  Almoço ${schedule.lunchMinutes.asHourMinuteText()}",
+                                color = Color.White.copy(alpha = 0.70f),
+                                fontSize = 13.sp
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(28.dp))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HistorySection(history: List<PunchDay>, schedule: WorkSchedule) {
+    val dateFormatter = remember {
+        DateTimeFormatter.ofPattern("dd/MM • EEE", Locale("pt", "BR"))
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(22.dp))
+            .background(Color.White.copy(alpha = 0.08f))
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Text("HISTÓRICO / CALENDÁRIO", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+        if (history.isEmpty()) {
+            Text("Seu calendário começa com a primeira batida.", color = Color.White.copy(alpha = 0.66f))
+        } else {
+            history.take(31).forEach { day ->
+                val worked = WorkDayCalculator.workedMinutes(day.punches)
+                val finished = day.punches.state() == WorkDayState.FINISHED
+                val balance = WorkDayCalculator.balanceMinutes(day.punches, schedule)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color.White.copy(alpha = 0.08f))
+                        .padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(day.date.format(dateFormatter).uppercase(Locale("pt", "BR")), color = Color.White, fontWeight = FontWeight.SemiBold)
                         Text(
-                            text = "Jornada ${schedule.dailyMinutes.asHourMinuteText()}  •  Almoço ${schedule.lunchMinutes.asHourMinuteText()}",
-                            color = Color.White.copy(alpha = 0.70f),
-                            fontSize = 13.sp
+                            text = day.punches.joinToString("  •  ") { it.time.format(DateTimeFormatter.ofPattern("HH:mm")) },
+                            color = Color.White.copy(alpha = 0.65f),
+                            fontSize = 12.sp
+                        )
+                    }
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(worked.asHourMinuteText(), color = Color.White, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            text = if (finished && balance != null) balance.asHourMinuteText(showSign = true) else "em aberto",
+                            color = Color.White.copy(alpha = 0.65f),
+                            fontSize = 12.sp
                         )
                     }
                 }
