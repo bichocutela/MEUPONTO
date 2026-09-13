@@ -58,6 +58,7 @@ import com.bichocutela.meuponto.data.PunchStore
 import com.bichocutela.meuponto.data.ScheduleStore
 import com.bichocutela.meuponto.domain.Punch
 import com.bichocutela.meuponto.domain.PunchType
+import com.bichocutela.meuponto.domain.StatisticsCalculator
 import com.bichocutela.meuponto.domain.WorkDayCalculator
 import com.bichocutela.meuponto.domain.WorkDayState
 import com.bichocutela.meuponto.domain.WorkSchedule
@@ -66,6 +67,7 @@ import com.bichocutela.meuponto.domain.nextPunchType
 import com.bichocutela.meuponto.domain.state
 import com.bichocutela.meuponto.notifications.LunchReminderReceiver
 import com.bichocutela.meuponto.notifications.LunchReminderScheduler
+import com.bichocutela.meuponto.ui.StatisticsSection
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -91,6 +93,7 @@ private fun MeuPontoApp() {
     val scope = rememberCoroutineScope()
     var showSettings by remember { mutableStateOf(false) }
     var showHistory by remember { mutableStateOf(false) }
+    var showStatistics by remember { mutableStateOf(false) }
 
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -108,6 +111,9 @@ private fun MeuPontoApp() {
     val state = punches.state()
     val nextPunch = state.nextPunchType()
     val formatter = remember { DateTimeFormatter.ofPattern("HH:mm") }
+    val statistics = remember(history, schedule) {
+        StatisticsCalculator.calculate(history.map { it.punches }, schedule)
+    }
 
     val transition = rememberInfiniteTransition(label = "glassPulse")
     val glow by transition.animateFloat(
@@ -239,25 +245,37 @@ private fun MeuPontoApp() {
                     Spacer(Modifier.height(10.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         OutlinedButton(
                             onClick = {
                                 showHistory = false
+                                showStatistics = false
                                 showSettings = !showSettings
                             },
                             modifier = Modifier.weight(1f)
                         ) {
-                            Text(if (showSettings) "FECHAR" else "AJUSTES", color = Color.White)
+                            Text(if (showSettings) "HOJE" else "AJUSTES", color = Color.White, fontSize = 12.sp)
                         }
                         OutlinedButton(
                             onClick = {
                                 showSettings = false
+                                showStatistics = false
                                 showHistory = !showHistory
                             },
                             modifier = Modifier.weight(1f)
                         ) {
-                            Text(if (showHistory) "HOJE" else "HISTÓRICO", color = Color.White)
+                            Text(if (showHistory) "HOJE" else "HISTÓRICO", color = Color.White, fontSize = 12.sp)
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                showSettings = false
+                                showHistory = false
+                                showStatistics = !showStatistics
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(if (showStatistics) "HOJE" else "DADOS", color = Color.White, fontSize = 12.sp)
                         }
                     }
 
@@ -272,6 +290,10 @@ private fun MeuPontoApp() {
                         showHistory -> {
                             Spacer(Modifier.height(12.dp))
                             HistorySection(history = history, schedule = schedule)
+                        }
+                        showStatistics -> {
+                            Spacer(Modifier.height(12.dp))
+                            StatisticsSection(statistics = statistics)
                         }
                         else -> {
                             Spacer(Modifier.height(10.dp))
