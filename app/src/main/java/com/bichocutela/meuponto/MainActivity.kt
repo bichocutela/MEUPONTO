@@ -67,6 +67,7 @@ import com.bichocutela.meuponto.domain.nextPunchType
 import com.bichocutela.meuponto.domain.state
 import com.bichocutela.meuponto.notifications.LunchReminderReceiver
 import com.bichocutela.meuponto.notifications.LunchReminderScheduler
+import com.bichocutela.meuponto.ui.ManualPunchEditor
 import com.bichocutela.meuponto.ui.StatisticsSection
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
@@ -81,6 +82,8 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+private enum class Panel { TODAY, SETTINGS, HISTORY, STATISTICS, CORRECTION }
+
 @Composable
 private fun MeuPontoApp() {
     val context = LocalContext.current.applicationContext
@@ -91,9 +94,7 @@ private fun MeuPontoApp() {
     val history by punchStore.history.collectAsState(initial = emptyList())
     val schedule by scheduleStore.schedule.collectAsState(initial = WorkSchedule())
     val scope = rememberCoroutineScope()
-    var showSettings by remember { mutableStateOf(false) }
-    var showHistory by remember { mutableStateOf(false) }
-    var showStatistics by remember { mutableStateOf(false) }
+    var panel by remember { mutableStateOf(Panel.TODAY) }
 
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -101,7 +102,8 @@ private fun MeuPontoApp() {
 
     LaunchedEffect(Unit) {
         LunchReminderReceiver.createChannel(context)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -119,10 +121,7 @@ private fun MeuPontoApp() {
     val glow by transition.animateFloat(
         initialValue = 0.72f,
         targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(2200),
-            repeatMode = RepeatMode.Reverse
-        ),
+        animationSpec = infiniteRepeatable(animation = tween(2200), repeatMode = RepeatMode.Reverse),
         label = "glow"
     )
 
@@ -144,9 +143,7 @@ private fun MeuPontoApp() {
                     .padding(horizontal = 20.dp, vertical = 32.dp)
             ) {
                 Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .verticalScroll(rememberScrollState()),
+                    modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.Top,
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
@@ -156,30 +153,29 @@ private fun MeuPontoApp() {
                     Text(statusText(state), color = Color.White.copy(alpha = 0.78f), fontSize = 15.sp)
                     Spacer(Modifier.height(20.dp))
 
-                    GlassCard(glow = glow) {
+                    GlassCard(glow) {
                         Text(
-                            text = punches.lastOrNull()?.time?.format(formatter) ?: "--:--",
+                            punches.lastOrNull()?.time?.format(formatter) ?: "--:--",
                             color = Color.White,
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 54.sp
                         )
                         Text(
-                            text = punches.lastOrNull()?.let { punchLabel(it.type) } ?: "Nenhum ponto registrado hoje",
+                            punches.lastOrNull()?.let { punchLabel(it.type) } ?: "Nenhum ponto registrado hoje",
                             color = Color.White.copy(alpha = 0.72f),
                             fontSize = 14.sp
                         )
-
                         if (state == WorkDayState.ON_LUNCH) {
                             Spacer(Modifier.height(18.dp))
                             val expectedReturn = WorkDayCalculator.lunchExpectedReturn(punches, schedule)
                             Text(
-                                text = "Retorno previsto ${expectedReturn?.format(formatter) ?: "--:--"}",
+                                "Retorno previsto ${expectedReturn?.format(formatter) ?: "--:--"}",
                                 color = Color.White,
                                 fontWeight = FontWeight.Medium,
                                 fontSize = 16.sp
                             )
                             Text(
-                                text = "Lembrete ${schedule.reminderMinutesBefore} min antes",
+                                "Lembrete ${schedule.reminderMinutesBefore} min antes",
                                 color = Color.White.copy(alpha = 0.70f),
                                 fontSize = 13.sp
                             )
@@ -192,14 +188,14 @@ private fun MeuPontoApp() {
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         MetricCard(
-                            modifier = Modifier.weight(1f),
-                            title = "Trabalhado",
-                            value = WorkDayCalculator.workedMinutes(punches).asHourMinuteText()
+                            Modifier.weight(1f),
+                            "Trabalhado",
+                            WorkDayCalculator.workedMinutes(punches).asHourMinuteText()
                         )
                         MetricCard(
-                            modifier = Modifier.weight(1f),
-                            title = if (state == WorkDayState.FINISHED) "Saldo" else "Falta",
-                            value = if (state == WorkDayState.FINISHED) {
+                            Modifier.weight(1f),
+                            if (state == WorkDayState.FINISHED) "Saldo" else "Falta",
+                            if (state == WorkDayState.FINISHED) {
                                 (WorkDayCalculator.balanceMinutes(punches, schedule) ?: 0).asHourMinuteText(showSign = true)
                             } else {
                                 WorkDayCalculator.remainingMinutes(punches, schedule).asHourMinuteText()
@@ -213,19 +209,14 @@ private fun MeuPontoApp() {
                             nextPunch?.let { type ->
                                 val now = LocalTime.now().withSecond(0).withNano(0)
                                 val updated = punches + Punch(type, now)
-
                                 when (type) {
-                                    PunchType.LUNCH_OUT -> {
-                                        val expectedReturn = now.plusMinutes(schedule.lunchMinutes.toLong())
-                                        reminderScheduler.schedule(
-                                            expectedReturn = expectedReturn,
-                                            minutesBefore = schedule.reminderMinutesBefore
-                                        )
-                                    }
+                                    PunchType.LUNCH_OUT -> reminderScheduler.schedule(
+                                        expectedReturn = now.plusMinutes(schedule.lunchMinutes.toLong()),
+                                        minutesBefore = schedule.reminderMinutesBefore
+                                    )
                                     PunchType.LUNCH_RETURN -> reminderScheduler.cancel()
                                     else -> Unit
                                 }
-
                                 scope.launch { punchStore.saveToday(updated) }
                             }
                         },
@@ -247,58 +238,53 @@ private fun MeuPontoApp() {
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        OutlinedButton(
-                            onClick = {
-                                showHistory = false
-                                showStatistics = false
-                                showSettings = !showSettings
-                            },
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text(if (showSettings) "HOJE" else "AJUSTES", color = Color.White, fontSize = 12.sp)
+                        NavButton("AJUSTES", panel == Panel.SETTINGS, Modifier.weight(1f)) {
+                            panel = togglePanel(panel, Panel.SETTINGS)
                         }
-                        OutlinedButton(
-                            onClick = {
-                                showSettings = false
-                                showStatistics = false
-                                showHistory = !showHistory
-                            },
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text(if (showHistory) "HOJE" else "HISTÓRICO", color = Color.White, fontSize = 12.sp)
+                        NavButton("HISTÓRICO", panel == Panel.HISTORY, Modifier.weight(1f)) {
+                            panel = togglePanel(panel, Panel.HISTORY)
                         }
-                        OutlinedButton(
-                            onClick = {
-                                showSettings = false
-                                showHistory = false
-                                showStatistics = !showStatistics
-                            },
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text(if (showStatistics) "HOJE" else "DADOS", color = Color.White, fontSize = 12.sp)
+                        NavButton("DADOS", panel == Panel.STATISTICS, Modifier.weight(1f)) {
+                            panel = togglePanel(panel, Panel.STATISTICS)
                         }
                     }
+                    Spacer(Modifier.height(8.dp))
+                    NavButton("CORRIGIR PONTOS DE HOJE", panel == Panel.CORRECTION, Modifier.fillMaxWidth()) {
+                        panel = togglePanel(panel, Panel.CORRECTION)
+                    }
 
-                    when {
-                        showSettings -> {
+                    when (panel) {
+                        Panel.SETTINGS -> {
                             Spacer(Modifier.height(12.dp))
-                            SettingsCard(
-                                schedule = schedule,
-                                onChange = { updated -> scope.launch { scheduleStore.save(updated) } }
-                            )
+                            SettingsCard(schedule) { updated -> scope.launch { scheduleStore.save(updated) } }
                         }
-                        showHistory -> {
+                        Panel.HISTORY -> {
                             Spacer(Modifier.height(12.dp))
-                            HistorySection(history = history, schedule = schedule)
+                            HistorySection(history, schedule)
                         }
-                        showStatistics -> {
+                        Panel.STATISTICS -> {
                             Spacer(Modifier.height(12.dp))
-                            StatisticsSection(statistics = statistics)
+                            StatisticsSection(statistics)
                         }
-                        else -> {
+                        Panel.CORRECTION -> {
+                            Spacer(Modifier.height(12.dp))
+                            ManualPunchEditor(punches) { corrected ->
+                                scope.launch {
+                                    punchStore.saveToday(corrected)
+                                    reminderScheduler.cancel()
+                                    if (corrected.state() == WorkDayState.ON_LUNCH) {
+                                        WorkDayCalculator.lunchExpectedReturn(corrected, schedule)?.let { expectedReturn ->
+                                            reminderScheduler.schedule(expectedReturn, schedule.reminderMinutesBefore)
+                                        }
+                                    }
+                                    panel = Panel.TODAY
+                                }
+                            }
+                        }
+                        Panel.TODAY -> {
                             Spacer(Modifier.height(10.dp))
                             Text(
-                                text = "Jornada ${schedule.dailyMinutes.asHourMinuteText()}  •  Almoço ${schedule.lunchMinutes.asHourMinuteText()}",
+                                "Jornada ${schedule.dailyMinutes.asHourMinuteText()}  •  Almoço ${schedule.lunchMinutes.asHourMinuteText()}",
                                 color = Color.White.copy(alpha = 0.70f),
                                 fontSize = 13.sp
                             )
@@ -312,10 +298,18 @@ private fun MeuPontoApp() {
 }
 
 @Composable
-private fun HistorySection(history: List<PunchDay>, schedule: WorkSchedule) {
-    val dateFormatter = remember {
-        DateTimeFormatter.ofPattern("dd/MM • EEE", Locale("pt", "BR"))
+private fun NavButton(text: String, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    OutlinedButton(onClick = onClick, modifier = modifier) {
+        Text(if (selected) "HOJE" else text, color = Color.White, fontSize = 12.sp)
     }
+}
+
+private fun togglePanel(current: Panel, target: Panel): Panel = if (current == target) Panel.TODAY else target
+
+@Composable
+private fun HistorySection(history: List<PunchDay>, schedule: WorkSchedule) {
+    val dateFormatter = remember { DateTimeFormatter.ofPattern("dd/MM • EEE", Locale("pt", "BR")) }
+    val timeFormatter = remember { DateTimeFormatter.ofPattern("HH:mm") }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -341,9 +335,13 @@ private fun HistorySection(history: List<PunchDay>, schedule: WorkSchedule) {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(day.date.format(dateFormatter).uppercase(Locale("pt", "BR")), color = Color.White, fontWeight = FontWeight.SemiBold)
                         Text(
-                            text = day.punches.joinToString("  •  ") { it.time.format(DateTimeFormatter.ofPattern("HH:mm")) },
+                            day.date.format(dateFormatter).uppercase(Locale("pt", "BR")),
+                            color = Color.White,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            day.punches.joinToString("  •  ") { it.time.format(timeFormatter) },
                             color = Color.White.copy(alpha = 0.65f),
                             fontSize = 12.sp
                         )
@@ -351,7 +349,7 @@ private fun HistorySection(history: List<PunchDay>, schedule: WorkSchedule) {
                     Column(horizontalAlignment = Alignment.End) {
                         Text(worked.asHourMinuteText(), color = Color.White, fontWeight = FontWeight.SemiBold)
                         Text(
-                            text = if (finished && balance != null) balance.asHourMinuteText(showSign = true) else "em aberto",
+                            if (finished && balance != null) balance.asHourMinuteText(showSign = true) else "em aberto",
                             color = Color.White.copy(alpha = 0.65f),
                             fontSize = 12.sp
                         )
@@ -373,22 +371,22 @@ private fun SettingsCard(schedule: WorkSchedule, onChange: (WorkSchedule) -> Uni
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         SettingRow(
-            title = "Jornada",
-            value = schedule.dailyMinutes.asHourMinuteText(),
-            onMinus = { onChange(schedule.copy(dailyMinutes = (schedule.dailyMinutes - 15).coerceAtLeast(60))) },
-            onPlus = { onChange(schedule.copy(dailyMinutes = (schedule.dailyMinutes + 15).coerceAtMost(16 * 60))) }
+            "Jornada",
+            schedule.dailyMinutes.asHourMinuteText(),
+            { onChange(schedule.copy(dailyMinutes = (schedule.dailyMinutes - 15).coerceAtLeast(60))) },
+            { onChange(schedule.copy(dailyMinutes = (schedule.dailyMinutes + 15).coerceAtMost(16 * 60))) }
         )
         SettingRow(
-            title = "Almoço",
-            value = schedule.lunchMinutes.asHourMinuteText(),
-            onMinus = { onChange(schedule.copy(lunchMinutes = (schedule.lunchMinutes - 5).coerceAtLeast(15))) },
-            onPlus = { onChange(schedule.copy(lunchMinutes = (schedule.lunchMinutes + 5).coerceAtMost(240))) }
+            "Almoço",
+            schedule.lunchMinutes.asHourMinuteText(),
+            { onChange(schedule.copy(lunchMinutes = (schedule.lunchMinutes - 5).coerceAtLeast(15))) },
+            { onChange(schedule.copy(lunchMinutes = (schedule.lunchMinutes + 5).coerceAtMost(240))) }
         )
         SettingRow(
-            title = "Lembrete",
-            value = "${schedule.reminderMinutesBefore} min",
-            onMinus = { onChange(schedule.copy(reminderMinutesBefore = previousReminder(schedule.reminderMinutesBefore))) },
-            onPlus = { onChange(schedule.copy(reminderMinutesBefore = nextReminder(schedule.reminderMinutesBefore))) }
+            "Lembrete",
+            "${schedule.reminderMinutesBefore} min",
+            { onChange(schedule.copy(reminderMinutesBefore = previousReminder(schedule.reminderMinutesBefore))) },
+            { onChange(schedule.copy(reminderMinutesBefore = nextReminder(schedule.reminderMinutesBefore))) }
         )
     }
 }
@@ -406,7 +404,11 @@ private fun SettingRow(title: String, value: String, onMinus: () -> Unit, onPlus
 @Composable
 private fun GlassCard(glow: Float, content: @Composable ColumnScope.() -> Unit) {
     Column(
-        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(Color.White.copy(alpha = 0.12f * glow)).padding(24.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(28.dp))
+            .background(Color.White.copy(alpha = 0.12f * glow))
+            .padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         content = content
     )
